@@ -1,4 +1,4 @@
-import gradio as gr
+import streamlit as st
 import numpy as np
 from PIL import Image
 import tensorflow as tf
@@ -8,17 +8,11 @@ import matplotlib.pyplot as plt
 MODEL_PATH = "Model/classifier.tflite"
 INPUT_SIZE = (64, 64)
 
-# --- Load TFLite Model ---
-# Gradio doesn't have a direct equivalent to st.cache_resource, 
-# but we can load the model globally or use a singleton pattern.
-# For simplicity, we'll load it globally or lazily.
-interpreter = None
-
+# --- Load TFLite Model (cached) ---
+@st.cache_resource
 def load_tflite_model():
-    global interpreter
-    if interpreter is None:
-        interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-        interpreter.allocate_tensors()
+    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
     return interpreter
 
 # --- Preprocessing ---
@@ -44,69 +38,65 @@ def predict_tflite(interpreter, img_array):
     else:
         benign_prob = float(output[0])
         malignant_prob = float(output[1])
+
     return benign_prob, malignant_prob
 
-# --- Gradio Logic ---
-def predict_fn(image, threshold):
-    if image is None:
-        return "Please upload an image.", "", None
+# --- UI ---
+st.set_page_config(page_title="Melanoma Detection")
 
-    try:
-        # Image comes as a numpy array from Gradio by default, convert to PIL
-        img = Image.fromarray(image)
-        
-        interp = load_tflite_model()
-        img_array = preprocess_image(img)
-        benign_prob, malignant_prob = predict_tflite(interp, img_array)
+st.title("🔬 Melanoma Detection - TFLite Model")
 
-        is_malignant = malignant_prob > threshold
-        prediction_label = "Malignant" if is_malignant else "Benign"
-        confidence = malignant_prob if is_malignant else benign_prob
-        
-        # Result Text
-        result_text = f"Prediction: {prediction_label}"
-        confidence_text = f"Confidence: {confidence:.2%}"
-        
-        if is_malignant:
-            message = "⚠️ High risk detected. Please consult a dermatologist."
-        else:
-            message = "✅ Low risk. Continue regular monitoring."
-            
-        full_text = f"{result_text}\n{confidence_text}\n\n{message}"
+col1, col2 = st.columns(2)
 
-        # Plot
-        fig, ax = plt.subplots(figsize=(5, 3))
-        ax.bar(["Benign", "Malignant"], [benign_prob, malignant_prob], color=["green", "red"])
-        ax.set_ylim(0, 1)
-        ax.set_ylabel("Probability")
-        ax.set_title("Prediction Confidence")
-        plt.tight_layout()
-        
-        return prediction_label, full_text, fig
-        
-    except Exception as e:
-        return "Error", f"Error processing image: {str(e)}", None
+with col1:
+    uploaded_file = st.file_uploader("Upload a dermoscopic image", type=["jpg", "png", "jpeg"])
+    threshold = st.slider("Malignant Confidence Threshold", 0.5, 0.95, 0.7, 0.05)
+    predict_btn = st.button("Predict")
 
-# --- Gradio Interface ---
-with gr.Blocks(title="Melanoma Detection") as demo:
-    gr.Markdown("# 🔬 Melanoma Detection - TFLite Model")
-    
-    with gr.Row():
-        with gr.Column():
-            input_image = gr.Image(label="Upload a dermoscopic image", type="numpy")
-            threshold_slider = gr.Slider(minimum=0.5, maximum=0.95, value=0.7, step=0.05, label="Malignant Confidence Threshold")
-            submit_btn = gr.Button("Predict", variant="primary")
-        
-        with gr.Column():
-            output_label = gr.Label(label="Prediction")
-            output_text = gr.Textbox(label="Details", lines=4)
-            output_plot = gr.Plot(label="Confidence Plot")
+with col2:
+    output_label = st.empty()
+    output_text = st.empty()
+    output_plot = st.empty()
 
-    submit_btn.click(
-        fn=predict_fn,
-        inputs=[input_image, threshold_slider],
-        outputs=[output_label, output_text, output_plot]
-    )
+# --- Prediction Logic ---
+if predict_btn:
+    if uploaded_file is None:
+        st.warning("Please upload an image.")
+    else:
+        try:
+            img = Image.open(uploaded_file)
 
-if __name__ == "__main__":
-    demo.launch()
+            interpreter = load_tflite_model()
+            img_array = preprocess_image(img)
+            benign_prob, malignant_prob = predict_tflite(interpreter, img_array)
+
+            is_malignant = malignant_prob > threshold
+            prediction_label = "Malignant" if is_malignant else "Benign"
+            confidence = malignant_prob if is_malignant else benign_prob
+
+            result_text = f"Prediction: {prediction_label}"
+            confidence_text = f"Confidence: {confidence:.2%}"
+
+            if is_malignant:
+                message = "⚠️ High risk detected. Please consult a dermatologist."
+            else:
+                message = "✅ Low risk. Continue regular monitoring."
+
+            full_text = f"{result_text}\n{confidence_text}\n\n{message}"
+
+            # Display outputs
+            output_label.metric("Prediction", prediction_label)
+            output_text.text(full_text)
+
+            # Plot
+            fig, ax = plt.subplots(figsize=(5, 3))
+            ax.bar(["Benign", "Malignant"], [benign_prob, malignant_prob])
+            ax.set_ylim(0, 1)
+            ax.set_ylabel("Probability")
+            ax.set_title("Prediction Confidence")
+            plt.tight_layout()
+
+            output_plot.pyplot(fig)
+
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
