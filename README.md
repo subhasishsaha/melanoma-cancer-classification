@@ -24,6 +24,16 @@ The repository contains:
 
 ---
 
+## Key Results
+
+- Trained a CNN from scratch on approximately 14,000 dermoscopic images for binary melanoma classification, with reliable precision/recall validated by confusion matrix analysis.
+- Eliminated training pipeline bottlenecks by implementing TensorFlow prefetching, custom batching, and on-the-fly normalization.
+- Converted to TensorFlow Lite for edge deployment compatibility.
+
+**Live Demo:** https://melanoma-cancer-classification.streamlit.app/
+
+---
+
 ## Features
 
 ### Deep Learning Classification
